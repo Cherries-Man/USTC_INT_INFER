@@ -34,7 +34,7 @@ print("model.device:", model.device)
 #     messages, add_generation_prompt=True, return_tensors="pt"
 # ).to(model.device)
 
-prompt = "Who are you?"
+prompt = "What is the meaning of life?"
 
 input_ids = tokenizer(prompt, return_tensors="pt").input_ids.to(model.device)
 
@@ -42,11 +42,11 @@ terminators = [tokenizer.eos_token_id, tokenizer.convert_tokens_to_ids("<|eot_id
 
 outputs = model.generate(
     input_ids,
-    max_new_tokens=256,
-    eos_token_id=terminators,
+    max_new_tokens=128,
+    #    eos_token_id=terminators,
     do_sample=False,
-    temperature=0.6,
-    top_p=0.9,
+    # temperature=0.01,
+    #    top_p=0.9,
 )
 response = outputs[0][input_ids.shape[-1] :]
 print(tokenizer.decode(response, skip_special_tokens=True))
