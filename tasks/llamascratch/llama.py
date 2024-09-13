@@ -1,4 +1,4 @@
-from transformers import AutoTokenizer, GenerationConfig
+from transformers import AutoTokenizer, GenerationConfig# , LlamaForCausalLM
 from my_modeling_llama import LlamaForCausalLM
 import torch
 
