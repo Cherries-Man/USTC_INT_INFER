@@ -23,7 +23,7 @@ print("Type of weight_path:", type(weight_path))
 tokenizer = AutoTokenizer.from_pretrained(weight_path)
 # tokenizer = PreTrainedTokenizerFast.from_pretrained(weight_path)
 hf_model = LlamaForCausalLM.from_pretrained(weight_path, torch_dtype=torch.bfloat16).to(
-    "cuda:5"
+    "cuda:6"
 )
 assert type(hf_model) == LlamaForCausalLM
 # prompt = f"Content: {very_long_text}\n\n Summary:"
@@ -42,12 +42,12 @@ output_text = tokenizer.convert_tokens_to_string(
     tokenizer.convert_ids_to_tokens(output_ids[0])
 )
 
-del tokenizer, hf_model, prompt_ids, gen_config
+del tokenizer, hf_model  # , prompt_ids, gen_config
 
 print("Output text:", output_text)
 
 engine = Engine(weight_path)
 llama_output = engine.execute([prompt])[0]
-# assert engine.prompt_ids == prompt_ids
+assert torch.equal(engine.prompt_ids, prompt_ids)
 print("Llama output:", llama_output)
 assert output_text == llama_output
