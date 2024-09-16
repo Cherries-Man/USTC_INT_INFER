@@ -12,7 +12,7 @@ import torch
 class Engine:
     def __init__(self, model_path: str) -> None:
         self.model = LlamaForCausalLM.from_pretrained(
-            model_path, torch_dtype=torch.bfloat16
+            model_path, torch_dtype=torch.bfloat16, attn_implementation="eager"
         ).to("cuda:6")
         print(self.model.config)
         self.tokenizer = AutoTokenizer.from_pretrained(model_path)

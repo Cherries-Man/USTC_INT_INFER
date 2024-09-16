@@ -22,9 +22,9 @@ print("Type of weight_path:", type(weight_path))
 # tokenizer = LlamaTokenizer.from_pretrained(weight_path)
 tokenizer = AutoTokenizer.from_pretrained(weight_path)
 # tokenizer = PreTrainedTokenizerFast.from_pretrained(weight_path)
-hf_model = LlamaForCausalLM.from_pretrained(weight_path, torch_dtype=torch.bfloat16).to(
-    "cuda:6"
-)
+hf_model = LlamaForCausalLM.from_pretrained(
+    weight_path, torch_dtype=torch.bfloat16, attn_implementation="eager"
+).to("cuda:6")
 assert type(hf_model) == LlamaForCausalLM
 # prompt = f"Content: {very_long_text}\n\n Summary:"
 prompt = very_long_text
