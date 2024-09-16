@@ -308,17 +308,27 @@ def apply_rotary_pos_emb(q, k, cos, sin, position_ids=None, unsqueeze_dim=1):
 class LlamaMLP(nn.Module):
     def __init__(self, config):
         super().__init__()
+        print("LlamaMLP")
         self.config = config
         self.hidden_size = config.hidden_size
         self.intermediate_size = config.intermediate_size
         self.gate_proj = nn.Linear(
             self.hidden_size, self.intermediate_size, bias=config.mlp_bias
         )
+        print(
+            f"self.gate_proj tensor weight memory usage: {(self.gate_proj.weight.element_size() * self.gate_proj.weight.numel()) / (1024 ** 2):.2f} MB"
+        )
         self.up_proj = nn.Linear(
             self.hidden_size, self.intermediate_size, bias=config.mlp_bias
         )
+        print(
+            f"self.up_proj tensor weight memory usage: {(self.up_proj.weight.element_size() * self.up_proj.weight.numel()) / (1024 ** 2):.2f} MB"
+        )
         self.down_proj = nn.Linear(
             self.intermediate_size, self.hidden_size, bias=config.mlp_bias
+        )
+        print(
+            f"self.down_proj tensor weight memory usage: {(self.down_proj.weight.element_size() * self.down_proj.weight.numel()) / (1024 ** 2):.2f} MB"
         )
         self.act_fn = ACT2FN[config.hidden_act]
 
@@ -403,22 +413,36 @@ class LlamaAttention(nn.Module):
         self.q_proj = nn.Linear(
             self.hidden_size, self.num_heads * self.head_dim, bias=config.attention_bias
         )
+        print(
+            f"self.q_proj tensor weight memory usage: {(self.q_proj.weight.element_size() * self.q_proj.weight.numel()) / (1024 ** 2):.2f} MB"
+        )
         self.k_proj = nn.Linear(
             self.hidden_size,
             self.num_key_value_heads * self.head_dim,
             bias=config.attention_bias,
+        )
+        print(
+            f"self.k_proj tensor weight memory usage: {(self.k_proj.weight.element_size() * self.k_proj.weight.numel()) / (1024 ** 2):.2f} MB"
         )
         self.v_proj = nn.Linear(
             self.hidden_size,
             self.num_key_value_heads * self.head_dim,
             bias=config.attention_bias,
         )
+        print(
+            f"self.v_proj tensor weight memory usage: {(self.v_proj.weight.element_size() * self.v_proj.weight.numel()) / (1024 ** 2):.2f} MB"
+        )
         self.o_proj = nn.Linear(
             self.hidden_size, self.hidden_size, bias=config.attention_bias
         )
-
+        print(
+            f"self.o_proj tensor weight memory usage: {(self.o_proj.weight.element_size() * self.o_proj.weight.numel()) / (1024 ** 2):.2f} MB"
+        )
         # TODO (joao): remove in v4.45 (RoPE is computed in the model, not in the decoder layers)
         self.rotary_emb = LlamaRotaryEmbedding(config=self.config)
+        print(
+            f"self.rotary_emb tensor weight memory usage: 暂时不考虑"
+        )
 
     def forward(
         self,
@@ -805,15 +829,12 @@ LLAMA_ATTENTION_CLASSES = {
 class LlamaDecoderLayer(nn.Module):
     def __init__(self, config: LlamaConfig, layer_idx: int):
         super().__init__()
+        print(f"Initializing LlamaDecoderLayer {layer_idx}")
         self.hidden_size = config.hidden_size
 
         self.self_attn = LLAMA_ATTENTION_CLASSES[config._attn_implementation](
             config=config, layer_idx=layer_idx
         )
-        # self.self_attn = LLAMA_ATTENTION_CLASSES['eager'](
-        #     config=config, layer_idx=layer_idx
-        # )
-
         self.mlp = LlamaMLP(config)
         self.input_layernorm = LlamaRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         self.post_attention_layernorm = LlamaRMSNorm(
@@ -1028,9 +1049,11 @@ class LlamaModel(LlamaPreTrainedModel):
         super().__init__(config)
         self.padding_idx = config.pad_token_id
         self.vocab_size = config.vocab_size
-
         self.embed_tokens = nn.Embedding(
             config.vocab_size, config.hidden_size, self.padding_idx
+        )
+        print(
+            f"Embedding layer weight memory usage: {(self.embed_tokens.weight.element_size() * self.embed_tokens.weight.numel()) / (1024 ** 2):.2f} MB"
         )
         self.layers = nn.ModuleList(
             [
@@ -1039,7 +1062,13 @@ class LlamaModel(LlamaPreTrainedModel):
             ]
         )
         self.norm = LlamaRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+        print(
+            f"self.norm tensor weight memory usage: {(self.norm.weight.element_size() * self.norm.weight.numel()) / (1024 ** 2):.2f} MB"
+        )
         self.rotary_emb = LlamaRotaryEmbedding(config=config)
+        print(
+            f"self.norm tensor weight memory usage: 暂时不考虑"
+        )
         self.gradient_checkpointing = False
 
         # Initialize weights and apply final processing
@@ -1092,7 +1121,11 @@ class LlamaModel(LlamaPreTrainedModel):
             use_cache = False
 
         if inputs_embeds is None:
+            print(f"gpu used {torch.cuda.memory_allocated()} memory")
+            print("input_ids.device: ", input_ids.device)
             inputs_embeds = self.embed_tokens(input_ids)
+            torch.cuda.synchronize()  # 确保所有操作完成
+            print(f"gpu used {torch.cuda.memory_allocated()} memory")
 
         return_legacy_cache = False
         if (
@@ -1282,6 +1315,9 @@ class LlamaForCausalLM(LlamaPreTrainedModel):
         self.model = LlamaModel(config)
         self.vocab_size = config.vocab_size
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
+        print(
+            f"self.lm_head tensor weight memory usage: {(self.lm_head.weight.element_size() * self.lm_head.weight.numel()) / (1024 ** 2):.2f} MB"
+        )
 
         # Initialize weights and apply final processing
         self.post_init()
