@@ -3,10 +3,12 @@ from transformers import (
     GenerationConfig,
     DynamicCache,
     EncoderDecoderCache,
+    logging,
 )  # , LlamaForCausalLM
 from my_modeling_llama import LlamaForCausalLM
 from typing import Optional
 import torch
+import time
 
 
 class Engine:
@@ -38,9 +40,12 @@ class Engine:
         cache_position = (
             torch.ones_like(input_ids[0, :], dtype=torch.int64).cumsum(0) - 1
         )
-
+        # 记录当前时间
+        start_time = time.time()
         while cur_len < generation_config.max_new_tokens:
-
+            # 记录prefill完成时间
+            if cur_len == 0:
+                prefill_finish_time = time.time()
             attention_mask = torch.ones(
                 input_ids.shape[:2], dtype=torch.long, device=input_ids.device
             )
@@ -92,6 +97,10 @@ class Engine:
             # This is needed to properly delete outputs.logits which may be very large for first iteration
             # Otherwise a reference to outputs is kept which keeps the logits alive in the next iteration
             del outputs
+        # 记录生成完成时间
+        decode_finish_time = time.time()
+        print(f"prefill time: {prefill_finish_time - start_time:.4f} 秒")
+        print(f"decode time:  {decode_finish_time - prefill_finish_time:.4f} 秒")
         print("cur_len: ", cur_len)
         # Convert to legacy cache if needed
         past_key_values = past_key_values.to_legacy_cache()
@@ -115,10 +124,30 @@ class Engine:
         )
         return [output_text]
 
+logger = logging.get_logger(__name__)
 
 if __name__ == "__main__":
+    # Start recording memory snapshot history, initialized with a buffer
+    # capacity of 100,000 memory events, via the `max_entries` field.
+    # torch.cuda.memory._record_memory_history(
+    #    max_entries=100000
+    # )
+    
     engine = Engine("/data0/xiac/hf_models/Llama-3-8B-Instruct")
     llama_output = engine.execute(["What is the meaning of life?"], temperature=0.001)[
         0
     ]
     print(llama_output)
+    
+    # In this sample, we save the snapshot after running 5 iterations.
+    #   - Save as many snapshots as you'd like.
+    #   - Snapshots will save last `max_entries` number of memory events
+    #     (100,000 in this example).
+    # file_prefix = "llama3_8b_instruct"
+    # try:
+    #    torch.cuda.memory._dump_snapshot(f"{file_prefix}.pickle")
+    # except Exception as e:
+    #    logger.error(f"Failed to capture memory snapshot {e}")
+
+    # # Stop recording memory snapshot history.
+    # torch.cuda.memory._record_memory_history(enabled=None)
