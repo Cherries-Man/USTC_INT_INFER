@@ -807,12 +807,12 @@ class LlamaDecoderLayer(nn.Module):
         super().__init__()
         self.hidden_size = config.hidden_size
 
-        # self.self_attn = LLAMA_ATTENTION_CLASSES[config._attn_implementation](
-        #     config=config, layer_idx=layer_idx
-        # )
-        self.self_attn = LLAMA_ATTENTION_CLASSES["eager"](
+        self.self_attn = LLAMA_ATTENTION_CLASSES[config._attn_implementation](
             config=config, layer_idx=layer_idx
         )
+        # self.self_attn = LLAMA_ATTENTION_CLASSES['eager'](
+        #     config=config, layer_idx=layer_idx
+        # )
 
         self.mlp = LlamaMLP(config)
         self.input_layernorm = LlamaRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
@@ -1278,6 +1278,7 @@ class LlamaForCausalLM(LlamaPreTrainedModel):
 
     def __init__(self, config):
         super().__init__(config)
+        # self.config._attn_implementation = "eager"
         self.model = LlamaModel(config)
         self.vocab_size = config.vocab_size
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
@@ -1367,10 +1368,10 @@ class LlamaForCausalLM(LlamaPreTrainedModel):
             position_ids=position_ids,
             past_key_values=past_key_values,
             inputs_embeds=inputs_embeds,
-            use_cache=use_cache,
+            use_cache=True,
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
-            return_dict=return_dict,
+            return_dict=True,
             cache_position=cache_position,
         )
 
