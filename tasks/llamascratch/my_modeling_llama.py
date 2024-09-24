@@ -1121,11 +1121,7 @@ class LlamaModel(LlamaPreTrainedModel):
             use_cache = False
 
         if inputs_embeds is None:
-            print(f"gpu used {torch.cuda.memory_allocated()} memory")
-            print("input_ids.device: ", input_ids.device)
             inputs_embeds = self.embed_tokens(input_ids)
-            torch.cuda.synchronize()  # 确保所有操作完成
-            print(f"gpu used {torch.cuda.memory_allocated()} memory")
 
         return_legacy_cache = False
         if (
