@@ -555,6 +555,36 @@ class Engine:
         self.tokenizer.pad_token = self.tokenizer.eos_token
         self.prompt_ids = None
 
+    def top_k_sampling(
+        self, top_k: int, scores: torch.FloatTensor
+    ) -> torch.FloatTensor:
+        top_k = min(top_k, scores.size(-1))  # Safety check
+        # Remove all tokens with a probability less than the last token of the top-k
+        indices_to_remove = scores < torch.topk(scores, top_k)[0][..., -1, None]
+        scores_processed = scores.masked_fill(indices_to_remove, -float("Inf"))
+        return scores_processed
+
+    def top_p_sampling(
+        self, top_p: float, scores: torch.FloatTensor
+    ) -> torch.FloatTensor:
+        sorted_logits, sorted_indices = torch.sort(scores, descending=False)
+        cumulative_probs = sorted_logits.softmax(dim=-1).cumsum(dim=-1)
+
+        # Remove tokens with cumulative top_p above the threshold (token with 0 are kept)
+        sorted_indices_to_remove = cumulative_probs <= (1 - top_p)
+        # Keep at least min_tokens_to_keep = 1
+        sorted_indices_to_remove[..., -1:] = 0
+
+        # scatter sorted tensors to original indexing
+        indices_to_remove = sorted_indices_to_remove.scatter(
+            1, sorted_indices, sorted_indices_to_remove
+        )
+        scores_processed = scores.masked_fill(indices_to_remove, -float("Inf"))
+        return scores_processed
+    def temperature_sampling(self, temperature: float, scores: torch.FloatTensor) -> torch.FloatTensor:
+        scores = scores / temperature
+        return scores
+
     def _generate(
         self,
         input_ids: torch.Tensor,
@@ -604,7 +634,17 @@ class Engine:
             # (the clone itself is always small)
             next_token_scores = logits[:, -1, :].clone()
 
-            next_tokens = torch.argmax(next_token_scores, dim=-1)
+            if generation_config.do_sample:
+                if generation_config.sampling_strategy == "top_k":
+                    next_token_scores = self.top_k_sampling(2, next_token_scores)
+                elif generation_config.sampling_strategy == "top_p":
+                    next_token_scores = self.top_p_sampling(0.9, next_token_scores)
+                elif generation_config.sampling_strategy == "temperature":
+                    next_token_scores = self.temperature_sampling(0.001, next_token_scores)
+                probs = nn.functional.softmax(next_token_scores, dim=-1)
+                next_tokens = torch.multinomial(probs, num_samples=1).squeeze(1)
+            else:
+                next_tokens = torch.argmax(next_token_scores, dim=-1)
 
             # finished sentences should have their next token be a padding token
             next_tokens = next_tokens * unfinished_sequences + eos_token_tensor * (
@@ -650,7 +690,10 @@ class Engine:
             .to(self.model.device)
         )
         gen_config = GenerationConfig(
-            max_new_tokens=max_new_tokens, do_sample=False, return_dict_in_generate=True
+            max_new_tokens=max_new_tokens,
+            return_dict_in_generate=True,
+            do_sample=True,
+            sampling_strategy="temperature",
         )
         # output_ids = self.model.generate(self.prompt_ids, gen_config).sequences
         output_ids = self._generate(self.prompt_ids, gen_config)
@@ -679,7 +722,8 @@ if __name__ == "__main__":
 
     engine = Engine("/data0/xiac/hf_models/Llama-3-8B-Instruct")
     llama_output = engine.execute(
-        ["What is the meaning of life?", "What is the meaning of life?"], temperature=0.001
+        ["What is the meaning of life?", "What is the meaning of life?"],
+        temperature=0.001,
     )
     # print(llama_output)
     for output in llama_output:
