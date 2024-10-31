@@ -2,11 +2,14 @@
 
 你需要完成`llama.py`中的`Engine`类. 并通过`test.py`的检查. 你只需要实现batchsize=1的版本即可.
 
-你必须使用Llama-3-8B-Instruct的权重(通过设置环境变量HF_MODELS_CACHE).
+你必须使用Llama-3-8B-Instruct的权重(通过设置环境变量HF_MODELS_CACHE). 你只能使用torch/transformers/numpy和内置库.
 
 
 torch: 你不能使用和Attention有关的任何实现. 例如MultiAttention, 或者SDPA. 除此之外都可以使用
-transformers: 你仅能继承LlamaPretrainedModel, 使用其from_pretrained方法加载权重. 你不能使用其他任何类和函数.
+
+transformers: 你仅能继承LlamaPretrainedModel, 使用其from_pretrained方法加载权重. 
+
+你不能使用其他任何类和函数.
 
 你需要在2周内完成该任务.
 
