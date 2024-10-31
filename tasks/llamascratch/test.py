@@ -24,7 +24,7 @@ tokenizer = AutoTokenizer.from_pretrained(weight_path)
 # tokenizer = PreTrainedTokenizerFast.from_pretrained(weight_path)
 hf_model = LlamaForCausalLM.from_pretrained(
     weight_path, torch_dtype=torch.bfloat16, attn_implementation="eager"
-).to("cuda:6")
+).to("cuda:5")
 assert type(hf_model) == LlamaForCausalLM
 # prompt = f"Content: {very_long_text}\n\n Summary:"
 prompt = very_long_text

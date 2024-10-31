@@ -44,9 +44,20 @@ outputs = model.generate(
     input_ids,
     max_new_tokens=128,
     #    eos_token_id=terminators,
-    do_sample=False,
+    do_sample=True,
     # temperature=0.01,
     #    top_p=0.9,
+    top_k=2,
 )
+
+# outputs = model.generate(
+#     input_ids,
+#     max_new_tokens=128,
+#     #    eos_token_id=terminators,
+#     do_sample=False,
+#     # temperature=0.01,
+#     #    top_p=0.9,
+#     # top_k=2,
+# )
 response = outputs[0][input_ids.shape[-1] :]
 print(tokenizer.decode(response, skip_special_tokens=True))

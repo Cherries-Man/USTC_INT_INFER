@@ -72,9 +72,13 @@ def _prepare_4d_causal_attention_mask_with_cache_position(
     )
     if sequence_length != 1:
         causal_mask = torch.triu(causal_mask, diagonal=1)
-    causal_mask *= torch.arange(target_length, device=device) > cache_position.reshape(
-        -1, 1
-    )
+    mid_result1 = torch.arange(target_length, device=device)
+    mid_result2 = cache_position.reshape(-1, 1)
+    mid_result = mid_result1 > mid_result2
+    causal_mask *= mid_result
+    # causal_mask *= torch.arange(target_length, device=device) > cache_position.reshape(
+    #     -1, 1
+    # )
     causal_mask = causal_mask[None, None, :, :].expand(batch_size, 1, -1, -1)
     if attention_mask is not None:
         causal_mask = causal_mask.clone()  # copy to contiguous memory for in-place edit
@@ -581,7 +585,10 @@ class Engine:
         )
         scores_processed = scores.masked_fill(indices_to_remove, -float("Inf"))
         return scores_processed
-    def temperature_sampling(self, temperature: float, scores: torch.FloatTensor) -> torch.FloatTensor:
+
+    def temperature_sampling(
+        self, temperature: float, scores: torch.FloatTensor
+    ) -> torch.FloatTensor:
         scores = scores / temperature
         return scores
 
@@ -640,7 +647,9 @@ class Engine:
                 elif generation_config.sampling_strategy == "top_p":
                     next_token_scores = self.top_p_sampling(0.9, next_token_scores)
                 elif generation_config.sampling_strategy == "temperature":
-                    next_token_scores = self.temperature_sampling(0.001, next_token_scores)
+                    next_token_scores = self.temperature_sampling(
+                        0.001, next_token_scores
+                    )
                 probs = nn.functional.softmax(next_token_scores, dim=-1)
                 next_tokens = torch.multinomial(probs, num_samples=1).squeeze(1)
             else:
@@ -722,7 +731,7 @@ if __name__ == "__main__":
 
     engine = Engine("/data0/xiac/hf_models/Llama-3-8B-Instruct")
     llama_output = engine.execute(
-        ["What is the meaning of life?", "What is the meaning of life?"],
+        ["What is the meaning of life?", "Who are you?"],
         temperature=0.001,
     )
     # print(llama_output)
