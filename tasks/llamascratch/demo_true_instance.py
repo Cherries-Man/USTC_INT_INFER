@@ -47,7 +47,7 @@ outputs = model.generate(
     do_sample=True,
     # temperature=0.01,
     #    top_p=0.9,
-    top_k=2,
+    # top_k=2,
 )
 
 # outputs = model.generate(
