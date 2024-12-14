@@ -6,6 +6,7 @@ from transformers import (
     logging,
     LlamaPreTrainedModel,
     LlamaConfig,
+    LlamaForCausalLM,
 )  # , LlamaForCausalLM
 from transformers.models.llama.modeling_llama import (
     LlamaRMSNorm,
@@ -459,6 +460,7 @@ class MyLlamaForCausalLM(LlamaPreTrainedModel):
 
     def __init__(self, config):
         super().__init__(config)
+        self._no_split_modules = ["MyLlamaDecoderLayer"]
         self.model = MyLlamaModel(config)
         self.vocab_size = config.vocab_size
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
@@ -552,8 +554,11 @@ class MyLlamaForCausalLM(LlamaPreTrainedModel):
 class Engine:
     def __init__(self, model_path: str) -> None:
         self.model = MyLlamaForCausalLM.from_pretrained(
-            model_path, torch_dtype=torch.bfloat16, attn_implementation="eager"
-        ).to("cuda:5")
+            model_path,
+            torch_dtype=torch.bfloat16,
+            # attn_implementation="eager",
+            device_map="auto",
+        )  # .to("cuda:0")
         print(self.model.config)
         self.tokenizer = AutoTokenizer.from_pretrained(model_path, padding_side="left")
         self.tokenizer.pad_token = self.tokenizer.eos_token
@@ -612,78 +617,80 @@ class Engine:
         cache_position = (
             torch.ones_like(input_ids[0, :], dtype=torch.int64).cumsum(0) - 1
         )
-        # 记录当前时间
-        start_time = time.time()
-        while cur_len < generation_config.max_new_tokens:
-            # 记录prefill完成时间
-            if cur_len == 0:
-                prefill_finish_time = time.time()
-            attention_mask = torch.ones(
-                input_ids.shape[:2], dtype=torch.long, device=input_ids.device
-            )
-            model_input_ids, position_ids = self.model.prepare_inputs_for_generation(
-                input_ids,
-                past_key_values=past_key_values,
-                attention_mask=attention_mask,
-                cache_position=cache_position,
-            )
+        # 禁用梯度
+        with torch.no_grad():
+            while cur_len < generation_config.max_new_tokens:
+                # 记录prefill完成时间
+                if cur_len == 0:
+                    prefill_start_time = time.time()
+                attention_mask = torch.ones(
+                    input_ids.shape[:2], dtype=torch.long, device=input_ids.device
+                )
+                model_input_ids, position_ids = self.model.prepare_inputs_for_generation(
+                    input_ids,
+                    past_key_values=past_key_values,
+                    attention_mask=attention_mask,
+                    cache_position=cache_position,
+                )
 
-            # forward pass to get next token
-            logits, past_key_values = self.model(
-                input_ids=model_input_ids,
-                attention_mask=attention_mask,
-                position_ids=position_ids,
-                past_key_values=past_key_values,
-                cache_position=cache_position,
-            )
+                # forward pass to get next token
+                logits, past_key_values = self.model(
+                    input_ids=model_input_ids,
+                    attention_mask=attention_mask,
+                    position_ids=position_ids,
+                    past_key_values=past_key_values,
+                    cache_position=cache_position,
+                )
 
-            # Clone is needed to avoid keeping a hanging ref to outputs.logits which may be very large for first iteration
-            # (the clone itself is always small)
-            next_token_scores = logits[:, -1, :].clone()
+                # Clone is needed to avoid keeping a hanging ref to outputs.logits which may be very large for first iteration
+                # (the clone itself is always small)
+                next_token_scores = logits[:, -1, :].clone()
 
-            if generation_config.do_sample:
-                if generation_config.sampling_strategy == "top_k":
-                    next_token_scores = self.top_k_sampling(2, next_token_scores)
-                elif generation_config.sampling_strategy == "top_p":
-                    next_token_scores = self.top_p_sampling(0.9, next_token_scores)
-                elif generation_config.sampling_strategy == "temperature":
-                    next_token_scores = self.temperature_sampling(
-                        0.001, next_token_scores
-                    )
-                probs = nn.functional.softmax(next_token_scores, dim=-1)
-                next_tokens = torch.multinomial(probs, num_samples=1).squeeze(1)
-            else:
-                next_tokens = torch.argmax(next_token_scores, dim=-1)
+                if generation_config.do_sample:
+                    if generation_config.sampling_strategy == "top_k":
+                        next_token_scores = self.top_k_sampling(2, next_token_scores)
+                    elif generation_config.sampling_strategy == "top_p":
+                        next_token_scores = self.top_p_sampling(0.9, next_token_scores)
+                    elif generation_config.sampling_strategy == "temperature":
+                        next_token_scores = self.temperature_sampling(
+                            0.001, next_token_scores
+                        )
+                    probs = nn.functional.softmax(next_token_scores, dim=-1)
+                    next_tokens = torch.multinomial(probs, num_samples=1).squeeze(1)
+                else:
+                    next_tokens = torch.argmax(next_token_scores, dim=-1)
 
-            # finished sentences should have their next token be a padding token
-            next_tokens = next_tokens * unfinished_sequences + eos_token_tensor * (
-                1 - unfinished_sequences
-            )
+                # finished sentences should have their next token be a padding token
+                next_tokens = next_tokens * unfinished_sequences + eos_token_tensor * (
+                    1 - unfinished_sequences
+                )
 
-            # update generated ids, model inputs, and length for next step
-            input_ids = torch.cat([input_ids, next_tokens[:, None]], dim=-1)
+                # update generated ids, model inputs, and length for next step
+                input_ids = torch.cat([input_ids, next_tokens[:, None]], dim=-1)
 
-            # update past_key_values keeping its naming used in model code
-            # _, past_key_values = self.model._extract_past_from_model_output(outputs)
+                # update past_key_values keeping its naming used in model code
+                # _, past_key_values = self.model._extract_past_from_model_output(outputs)
 
-            cache_position = (
-                cache_position[-1:] + 1
-            )  # update cache_position, only for the last token
+                cache_position = (
+                    cache_position[-1:] + 1
+                )  # update cache_position, only for the last token
 
-            unfinished_sequences = unfinished_sequences & ~torch.isin(
-                input_ids[:, -1], eos_token_tensor
-            )  # stopping_criteria(input_ids, scores)
-            cur_len += 1
+                unfinished_sequences = unfinished_sequences & ~torch.isin(
+                    input_ids[:, -1], eos_token_tensor
+                )  # stopping_criteria(input_ids, scores)
+                cur_len += 1
 
-            if unfinished_sequences.max() == 0:
-                break
-            # This is needed to properly delete outputs.logits which may be very large for first iteration
-            # Otherwise a reference to outputs is kept which keeps the logits alive in the next iteration
-            # del outputs
-            del logits
+                if unfinished_sequences.max() == 0:
+                    break
+                # This is needed to properly delete outputs.logits which may be very large for first iteration
+                # Otherwise a reference to outputs is kept which keeps the logits alive in the next iteration
+                # del outputs
+                del logits
+                if cur_len == 1:
+                    prefill_finish_time = time.time()
         # 记录生成完成时间
         decode_finish_time = time.time()
-        print(f"prefill time: {prefill_finish_time - start_time:.4f} 秒")
+        print(f"prefill time: {prefill_finish_time - prefill_start_time:.4f} 秒")
         print(f"decode time:  {decode_finish_time - prefill_finish_time:.4f} 秒")
         print("cur_len: ", cur_len)
         # Convert to legacy cache if needed
@@ -693,11 +700,16 @@ class Engine:
     def execute(
         self, prompts: list[str], max_new_tokens: int = 128, temperature=0.001
     ) -> list[str]:
+        # 记录当前时间
+        tokenizer_start_time = time.time()
         self.prompt_ids = (
             self.tokenizer(prompts, return_tensors="pt", padding=True)["input_ids"]
             # .view(1, -1)
             .to(self.model.device)
         )
+        tokenizer_finish_time = time.time()
+        print(f"prompt_ids shape: {self.prompt_ids.shape}")
+        print(f"tokenizer time: {tokenizer_finish_time - tokenizer_start_time:.4f} 秒")
         gen_config = GenerationConfig(
             max_new_tokens=max_new_tokens,
             return_dict_in_generate=True,
@@ -731,7 +743,15 @@ if __name__ == "__main__":
 
     engine = Engine("/data0/xiac/hf_models/Llama-3-8B-Instruct")
     llama_output = engine.execute(
-        ["What is the meaning of life?", "Who are you?"],
+        # ["What is the meaning of life?", "Who are you?"],
+        ["Who are you?"],
+#         [
+#             """Act I
+# The court gathers the next day, and King Claudius and Queen Gertrude discuss affairs of state with their elderly adviser Polonius. Claudius grants permission for Polonius's son Laertes to return to school in France, and he sends envoys to inform the King of Norway about Fortinbras. Claudius also questions Hamlet regarding his continuing to grieve for his father, and forbids him to return to his university in Wittenberg. After the court exits, Hamlet despairs of his father's death and his mother's hasty remarriage. Learning of the ghost from Horatio, Hamlet resolves to see it himself.
+
+# As Polonius's son Laertes prepares to depart for France, Polonius offers him advice that culminates in the maxim "to thine own self be true."[6] Polonius's daughter, Ophelia, admits her interest in Hamlet, but Laertes warns her against seeking the prince's attention, and Polonius orders her to reject his advances. That night on the rampart, the ghost appears to Hamlet, tells the prince that he was murdered by Claudius (by pouring poison into his ear as he slept), and demands that Hamlet avenge the murder. Hamlet agrees, and the ghost vanishes. The prince confides to Horatio and the sentries that from now on he plans to "put an antic disposition on", or act as though he has gone mad. Hamlet forces them to swear to keep his plans for revenge secret; however, he remains uncertain of the ghost's reliability.
+# """
+#         ],
         temperature=0.001,
     )
     # print(llama_output)
